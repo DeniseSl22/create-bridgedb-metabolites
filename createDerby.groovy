@@ -40,6 +40,8 @@ blacklist.add("104404-17-3")
 blacklist.add("CHEBI:17636")
 blacklist.add("HMDB0000912") // see bug #6
 blacklist.add("HMDB00912") // see bug #6
+blacklist.add("HMDB0006316") //wrong mappings to ChEBI, Pubchem Compound = 0
+blacklist.add("HMDB06316") //wrong mappings to ChEBI, Pubchem Compound = 0
 
 //inchiDS = DataSource.register ("Cin", "InChI").asDataSource()
 inchikeyDS = DataSource.register ("Ik", "InChIKey").asDataSource()
@@ -53,22 +55,31 @@ wikidataDS = DataSource.register ("Wd", "Wikidata").asDataSource()
 lmDS = DataSource.register ("Lm", "LIPID MAPS").asDataSource()
 knapsackDS = DataSource.register ("Cks", "KNApSAcK").asDataSource()
 dtxDS = DataSource.register ("Ect", "EPA CompTox").asDataSource()
-// drugbankDS = BioDataSource.DRUGBANK
-//iupharDS = DataSource.register ("Gpl", "Guide to Pharmacology").asDataSource() 
-//chemblDS = DataSource.register ("Cl", "ChEMBL compound").asDataSource() 
+//drugbankDS = BioDataSource.DRUGBANK //this only works with new BridgeDb release!
+drugbankDS = DataSource.register ("Dr", "DrugBank").asDataSource() 
+iupharDS = DataSource.register ("Gpl", "Guide to Pharmacology").asDataSource() 
+chemblDS = DataSource.register ("Cl", "ChEMBL compound").asDataSource() 
+
+//vmhmetaboliteDS = DataSource.register ("VmhM", "VMH metabolite").asDataSource() //Add this to BridgeDb, update libraries, add to website!
+
+chebiVersionFile = new File('data/chebi.version')
+chebiVersion = "180"
+if (chebiVersionFile.exists() && chebiVersionFile.canRead()) {
+  chebiVersion = chebiVersionFile.text.trim()
+}
 
 String dateStr = new SimpleDateFormat("yyyyMMdd").format(new Date());
 database.setInfo("BUILDDATE", dateStr);
 database.setInfo("DATASOURCENAME", "HMDB-CHEBI-WIKIDATA");
-database.setInfo("DATASOURCEVERSION", "HMDB4.0.20180929-CHEBI170-WIKIDATA20181224" + dateStr);
+database.setInfo("DATASOURCEVERSION", "HMDB4.0.20190116-CHEBI" + chebiVersion + "-WIKIDATA" + dateStr);
 database.setInfo("DATATYPE", "Metabolite");
 database.setInfo("SERIES", "standard_metabolite");
 
-def addXRef(GdbConstruct database, Xref ref, String node, DataSource source, Set genesDone, Set linkesDone) {
+def addXRef(GdbConstruct database, Xref ref, String node, DataSource source, Set genesDone, Set linkesDone, boolean isPrimary) {
    id = node.trim()
    if (id.length() > 0) {
      // println "id($source): $id"
-     ref2 = new Xref(id, source);
+     ref2 = new Xref(id, source, isPrimary);
      if (!genesDone.contains(ref2.toString())) {
        if (database.addGene(ref2) != 0) {
           println "Error (addXRef.addGene): " + database.recentException().getMessage()
@@ -87,6 +98,10 @@ def addXRef(GdbConstruct database, Xref ref, String node, DataSource source, Set
    }
 }
 
+def addXRef(GdbConstruct database, Xref ref, String node, DataSource source, Set genesDone, Set linkesDone) {
+  addXRef(database, ref, node, source, genesDone, linkesDone, (boolean)true)
+}
+
 def addAttribute(GdbConstruct database, Xref ref, String key, String value) {
    id = value.trim()
    // println "attrib($key): $id"
@@ -94,7 +109,7 @@ def addAttribute(GdbConstruct database, Xref ref, String key, String value) {
      println "Warn: attribute does not fit the Derby SQL schema: $id"
    } else if (id.length() > 0) {
      if (database.addAttribute(ref, key, value) != 0) {
-       println "Error (addAttrib): " + database.getException().getMessage()
+       println "Error (addAttrib): " + database.recentException().getMessage()
      }
    }
 }
@@ -102,7 +117,19 @@ def addAttribute(GdbConstruct database, Xref ref, String key, String value) {
 def cleanKey(String inchikey) {
    String cleanKey = inchikey.trim()
    if (cleanKey.startsWith("InChIKey=")) cleanKey = cleanKey.substring(9)
+   cleanKey = cleanKey.replace("\"", "")
    cleanKey
+}
+
+// read the secondary ChEBI identifiers
+deprChEBIFile = new File("deprecated_ChEBI.csv")
+deprChEBIIDs = new java.util.HashSet();
+if (deprChEBIFile.exists()) {
+  deprChEBIFile.eachLine { line,number ->
+    fields = line.split(",")
+    secid = fields[0]
+    deprChEBIIDs.add(secid)
+  }
 }
 
 // load the HMDB content
@@ -137,7 +164,7 @@ if (hmdbFile.exists()) {
          println "Error (incorrect HMDB): " + rootid
        }
        // println "HMDB old: ${rootid} -> ${newid}"
-       Xref ref = new Xref(rootid, BioDataSource.HMDB);
+       Xref ref = new Xref(rootid, BioDataSource.HMDB, false);
        Xref newref = (newid == null) ? null : new Xref(newid, BioDataSource.HMDB);
        if (!genesDone.contains(ref.toString())) {
          addError = database.addGene(ref);
@@ -188,11 +215,13 @@ if (hmdbFile.exists()) {
          addXRef(database, ref, rootNode.chemspider_id.toString(), chemspiderDS, genesDone, linksDone);
          String chebID = rootNode.chebi_id.toString().trim()
          if (chebID.startsWith("CHEBI:")) {
-           addXRef(database, ref, chebID, chebiDS, genesDone, linksDone);
-           addXRef(database, ref, chebID.substring(6), chebiDS, genesDone, linksDone);
+           boolean isPrimary = !deprChEBIIDs.contains(chebID.substring(6))
+           addXRef(database, ref, chebID, chebiDS, genesDone, linksDone, isPrimary);
+           addXRef(database, ref, chebID.substring(6), chebiDS, genesDone, linksDone, isPrimary);
          } else if (chebID.length() > 0) {
-           addXRef(database, ref, chebID, chebiDS, genesDone, linksDone);
-           addXRef(database, ref, "CHEBI:" + chebID, chebiDS, genesDone, linksDone);
+           boolean isPrimary = !deprChEBIIDs.contains(chebID)
+           addXRef(database, ref, chebID, chebiDS, genesDone, linksDone, isPrimary);
+           addXRef(database, ref, "CHEBI:" + chebID, chebiDS, genesDone, linksDone, isPrimary);
          }
          String keggID = rootNode.kegg_id.toString();
          if (keggID.length() > 0 && keggID.charAt(0) == 'C') {
@@ -232,11 +261,16 @@ chebiNames.eachLine { line,number ->
 
   error = 0
   columns = line.split('\t')
+  if (columns.length < 5) {
+    println "Error (chebi_names.tsv): unexpected line: " + line
+    return;
+  }
   shortid = columns[1]
+  boolean isPrimary = !deprChEBIIDs.contains(shortid)
   rootid = "CHEBI:" + shortid
   name = columns[4]
   // println rootid + " -> " + name
-  Xref shortRef = new Xref(shortid, BioDataSource.CHEBI);
+  Xref shortRef = new Xref(shortid, BioDataSource.CHEBI, false); // not primary by default
   if (!genesDone.contains(shortRef.toString())) {
     addError = database.addGene(shortRef);
     if (addError != 0) println "Error (addGene): " + database.recentException().getMessage()
@@ -246,7 +280,7 @@ chebiNames.eachLine { line,number ->
     error += linkError
     genesDone.add(shortRef.toString())
   }
-  Xref ref = new Xref(rootid, BioDataSource.CHEBI);
+  Xref ref = new Xref(rootid, BioDataSource.CHEBI, isPrimary);
   if (!genesDone.contains(ref.toString())) {
     addError = database.addGene(ref);
     if (addError != 0) println "Error (addGene): " + database.recentException().getMessage()
@@ -275,7 +309,8 @@ mappedIDs.eachLine { line,number ->
   if (!blacklist.contains(rootid)) {
     id = columns[4]
     println "$rootid -($type)-> $id"
-    Xref ref = new Xref(rootid, BioDataSource.CHEBI);
+    boolean isPrimary = !deprChEBIIDs.contains(rootid)
+    Xref ref = new Xref(rootid, BioDataSource.CHEBI, isPrimary);
     if (type == "CAS Registry Number") {
       if (!id.contains(" ") && !id.contains(":") && id.contains("-")) {
         addXRef(database, ref, id, BioDataSource.CAS, genesDone, linksDone);
@@ -432,75 +467,45 @@ new File("cs2wikidata.csv").eachLine { line,number ->
 }
 unitReport << "  <testcase classname=\"WikidataCreation\" name=\"ChemSpiderFound\"/>\n"
 
-//// IUPHAR registry numbers
-//counter = 0
-//error = 0
-//new File("gpl2wikidata.csv").eachLine { line,number ->
-//  if (number == 1) return // skip the first line
-//
-//  fields = line.split(",")
-//  rootid = fields[0].substring(31)
-//  Xref ref = new Xref(rootid, wikidataDS);
-// if (!genesDone.contains(ref.toString())) {
-//    addError = database.addGene(ref);
-//    if (addError != 0) println "Error (addGene): " + database.recentException().getMessage()
-//    error += addError
-//    linkError = database.addLink(ref,ref);
-//    if (linkError != 0) println "Error (addLinkItself): " + database.recentException().getMessage()
-//    error += linkError
-//   genesDone.add(ref.toString())
-//  }
-//
-//  // add external identifiers
-//  addXRef(database, ref, fields[1], iupharDS, genesDone, linksDone);
-//
-//  counter++
-//  if (counter % commitInterval == 0) {
-//    println "Info: errors: " + error + " (IUPHAR)"
-//    database.commit()
-//  }
-//}
-//unitReport << "  <testcase classname=\"WikidataCreation\" name=\"IUPHARFound\"/>\n"
+// IUPHAR registry numbers
+counter = 0
+error = 0
+new File("gpl2wikidata.csv").eachLine { line,number ->
+  if (number == 1) return // skip the first line
 
-//// ChEMBL Compound registry numbers
-//counter = 0
-//error = 0
-//new File("chembl2wikidata.csv").eachLine { line,number ->
-//  if (number == 1) return // skip the first line
-//
-//  fields = line.split(",")
-//  rootid = fields[0].substring(31)
-//  Xref ref = new Xref(rootid, wikidataDS);
-// if (!genesDone.contains(ref.toString())) {
-//    addError = database.addGene(ref);
-//    if (addError != 0) println "Error (addGene): " + database.recentException().getMessage()
-//    error += addError
-//    linkError = database.addLink(ref,ref);
-//    if (linkError != 0) println "Error (addLinkItself): " + database.recentException().getMessage()
-//    error += linkError
-//   genesDone.add(ref.toString())
-//  }
-//
-//  // add external identifiers
-//  addXRef(database, ref, fields[1], chemblDS, genesDone, linksDone);
-//
-//  counter++
-//  if (counter % commitInterval == 0) {
-//    println "Info: errors: " + error + " (ChEMBL)"
-//    database.commit()
-//  }
-//}
-//unitReport << "  <testcase classname=\"WikidataCreation\" name=\"CHEMBLFound\"/>\n"
+  fields = line.split(",")
+  rootid = fields[0].substring(31)
+  Xref ref = new Xref(rootid, wikidataDS);
+ if (!genesDone.contains(ref.toString())) {
+    addError = database.addGene(ref);
+    if (addError != 0) println "Error (addGene): " + database.recentException().getMessage()
+    error += addError
+    linkError = database.addLink(ref,ref);
+    if (linkError != 0) println "Error (addLinkItself): " + database.recentException().getMessage()
+    error += linkError
+   genesDone.add(ref.toString())
+  }
 
-//// Drugbank Compound registry numbers
+  // add external identifiers
+  addXRef(database, ref, fields[1], iupharDS, genesDone, linksDone);
+
+  counter++
+  if (counter % commitInterval == 0) {
+    println "Info: errors: " + error + " (IUPHAR)"
+    database.commit()
+  }
+}
+unitReport << "  <testcase classname=\"WikidataCreation\" name=\"IUPHARFound\"/>\n"
+
+//// VMH Metabolite identifiers
 //counter = 0
 //error = 0
-//new File("drugbank2wikidata.csv").eachLine { line,number ->
+//new File("Recon_test.csv").eachLine { line,number ->
 //  if (number == 1) return // skip the first line
-//
 //  fields = line.split(",")
-//  rootid = fields[0].substring(31)
-//  Xref ref = new Xref(rootid, wikidataDS);
+//  rootid = fields[0].trim() //no substring split needed, since we're mapping on inchiKey (for now)
+//  recon = fields[1].trim()
+//  Xref ref = new Xref(rootid, inchikeyDS); // add first column to InchiKey mappings.
 // if (!genesDone.contains(ref.toString())) {
 //    addError = database.addGene(ref);
 //    if (addError != 0) println "Error (addGene): " + database.recentException().getMessage()
@@ -510,17 +515,87 @@ unitReport << "  <testcase classname=\"WikidataCreation\" name=\"ChemSpiderFound
 //    error += linkError
 //   genesDone.add(ref.toString())
 //  }
-//
+
 //  // add external identifiers
-//  addXRef(database, ref, fields[1], drugbankDS, genesDone, linksDone);
-//
+  
+//  addXRef(database, ref, recon, vmhmetaboliteDS, genesDone, linksDone);
+  
 //  counter++
 //  if (counter % commitInterval == 0) {
-//    println "Info: errors: " + error + " (Drugbank)"
+//    println "Info: errors: " + error + " (VMH Metabolite)"
 //    database.commit()
 //  }
 //}
-//unitReport << "  <testcase classname=\"WikidataCreation\" name=\"DrugbankFound\"/>\n"
+//unitReport << "  <testcase classname=\"VMHMetaboliteCreation\" name=\"ReconFound\"/>\n" //Need to check if adapted line functions properly.
+
+
+// ChEMBL Compound registry numbers
+counter = 0
+error = 0
+new File("chembl2wikidata.csv").eachLine { line,number ->
+  if (number == 1) return // skip the first line
+
+  fields = line.split(",")
+  rootid = fields[0].substring(31)
+  Xref ref = new Xref(rootid, wikidataDS);
+ if (!genesDone.contains(ref.toString())) {
+    addError = database.addGene(ref);
+    if (addError != 0) println "Error (addGene): " + database.recentException().getMessage()
+    error += addError
+    linkError = database.addLink(ref,ref);
+    if (linkError != 0) println "Error (addLinkItself): " + database.recentException().getMessage()
+    error += linkError
+   genesDone.add(ref.toString())
+  }
+
+  // add external identifiers
+  addXRef(database, ref, fields[1], chemblDS, genesDone, linksDone);
+
+  counter++
+  if (counter % commitInterval == 0) {
+    println "Info: errors: " + error + " (ChEMBL)"
+    database.commit()
+  }
+}
+unitReport << "  <testcase classname=\"WikidataCreation\" name=\"CHEMBLFound\"/>\n"
+
+// Drugbank Compound registry numbers
+counter = 0
+error = 0
+new File("drugbank2wikidata.csv").eachLine { line,number ->
+  if (number == 1) return // skip the first line
+
+  fields = line.split(",")
+  rootid = fields[0].substring(31)
+  originalDrugBankID = fields[1]
+  longDrugbankID = "DB" + fields[1]
+
+  Xref ref = new Xref(rootid, wikidataDS);
+ if (!genesDone.contains(ref.toString())) {
+    addError = database.addGene(ref);
+    if (addError != 0) println "Error (addGene): " + database.recentException().getMessage()
+    error += addError
+    linkError = database.addLink(ref,ref);
+    if (linkError != 0) println "Error (addLinkItself): " + database.recentException().getMessage()
+    error += linkError
+   genesDone.add(ref.toString())
+  }
+
+  // add external identifiers, check if they start with or without "DB" to avoid wrong links.
+  if (originalDrugBankID.startsWith("DB")) {
+    addXRef(database, ref, fields[1], drugbankDS, genesDone, linksDone);
+  }
+  else{  
+    addXRef(database, ref, longDrugbankID, drugbankDS, genesDone, linksDone);
+  }
+
+  counter++
+  if (counter % commitInterval == 0) {
+    println "Info: errors: " + error + " (Drugbank)"
+    database.commit()
+  }
+}
+unitReport << "  <testcase classname=\"WikidataCreation\" name=\"DrugbankFound\"/>\n"
 
 
 // LIPID MAPS registry numbers
@@ -691,7 +766,7 @@ new File("names2wikidata.tsv").eachLine { line,number ->
   fields = line.split("\t")
   if (fields.length >= 3) {
     rootid = fields[0].replace("<","").replace(">","").substring(31)
-    key = fields[1].trim()
+    key = cleanKey(fields[1].trim())
     synonym = fields[2].trim().replace("\"","").replace("@en","")
     Xref ref = new Xref(rootid, wikidataDS);
     if (!genesDone.contains(ref.toString())) {

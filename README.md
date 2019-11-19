@@ -4,7 +4,7 @@ Create BridgeDb Identity Mapping files
 This groovy script creates a Derby file for BridgeDb [1,2] for use in PathVisio,
 etc.
 
-The script has been tested with HMDB 4.0 [3,4,5], ChEBI 159 [6], and Wikidata [7,8] from January 2018.
+The script has been tested with HMDB 4.0 [3,4,5], ChEBI 180 [6], and Wikidata [7,8] from Oct. 2019.
 
 I'm indebted to all that worked on identifier mappings in these projects:
 
@@ -33,6 +33,8 @@ BridgeDb License -> http://www.bridgedb.org/browser/trunk/LICENSE-2.0.txt
 
 Run the script and test the results
 -----------------------------------
+
+0. Update the [createDerby.groovy file](https://github.com/bridgedb/create-bridgedb-hmdb/blob/master/createDerby.groovy#L74) with the new version numbers ("DATASOURCEVERSION" field). this information is stored as metadata, and needed for example in the BridgeDb webservice to correctly display which data is in the mapping file.
 
 1. add the jars to your classpath, e.g. on Linux with:
 
@@ -87,6 +89,9 @@ However, you can also use the below curl command line operations.
   curl -H "Accept: text/csv" --data-urlencode query@wikidata/lm.rq -G https://query.wikidata.org/bigdata/namespace/wdq/sparql -o lm2wikidata.csv
   curl -H "Accept: text/csv" --data-urlencode query@wikidata/knapsack.rq -G https://query.wikidata.org/bigdata/namespace/wdq/sparql -o knapsack2wikidata.csv
   curl -H "Accept: text/csv" --data-urlencode query@wikidata/comptox.rq -G https://query.wikidata.org/bigdata/namespace/wdq/sparql -o comptox2wikidata.csv
+  curl -H "Accept: text/csv" --data-urlencode query@wikidata/iuphar.rq -G https://query.wikidata.org/bigdata/namespace/wdq/sparql -o gpl2wikidata.csv
+ curl -H "Accept: text/csv" --data-urlencode query@wikidata/chembl.rq -G https://query.wikidata.org/bigdata/namespace/wdq/sparql -o chembl2wikidata.csv
+ curl -H "Accept: text/csv" --data-urlencode query@wikidata/drugbank.rq -G https://query.wikidata.org/bigdata/namespace/wdq/sparql -o drugbank2wikidata.csv
   ```
 
 4.2 Get compound labels and InChIKeys
@@ -99,7 +104,7 @@ InChIKeys can be downloaded as simple TSV and saved as "names2wikidata.tsv"
   curl -H "Accept: text/tab-separated-values" --data-urlencode query@wikidata/names.rq -G https://query.wikidata.org/bigdata/namespace/wdq/sparql -o names2wikidata.tsv
   ```
 
-5. Update the [createDerby.groovy file](https://github.com/bridgedb/create-bridgedb-hmdb/blob/master/createDerby.groovy#L61) with the new version numbers ("DATASOURCEVERSION" field) and run the script with Groovy:
+5. Run the script with Groovy:
 
   ```
   export CLASSPATH=`ls -1 *.jar | tr '\n' ':'`
